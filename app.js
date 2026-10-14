@@ -7,7 +7,7 @@
 const STORAGE_KEY = 'lebensdashboard:v1';
 const DATA_VERSION = 1;
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '10';
+const APP_VERSION = '11';
 
 const CATEGORIES = ['Gesundheit', 'Beruf', 'Finanzen', 'Beziehungen', 'Persönlich', 'Lernen', 'Freizeit'];
 const PRIOS = { 3: 'Hoch', 2: 'Normal', 1: 'Niedrig' };

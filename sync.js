@@ -299,7 +299,8 @@ function syncSection() {
       <div class="field"><label for="sync-pw">Passwort</label>
         <input id="sync-pw" name="password" type="password" autocomplete="current-password" minlength="6" required></div>
       <button type="submit" class="primary-btn">Anmelden</button>
-      <button type="button" class="link" data-action="syncSignup" style="width:100%;text-align:center;margin-top:4px">Noch kein Konto? Konto erstellen</button>
+      <button type="button" class="link" data-action="syncForgot" style="width:100%;text-align:center;margin-top:4px">Passwort vergessen?</button>
+      <button type="button" class="link" data-action="syncSignup" style="width:100%;text-align:center">Noch kein Konto? Konto erstellen</button>
     </form>
     <p class="small">Deine Daten bleiben auch ohne Anmeldung auf diesem Gerät. Beim ersten Anmelden werden sie mit deinen anderen Geräten zusammengeführt – es geht nichts verloren.</p>
   </section>`;
@@ -348,8 +349,62 @@ async function signup() {
   }
 }
 
+// Schickt eine E-Mail mit einem Link, über den man ein neues Passwort festlegt.
+async function forgotPassword() {
+  const email = $('#sync-form')?.elements.email.value.trim() || '';
+  if (!email) { toast('Bitte zuerst oben deine E-Mail eingeben'); $('#sync-email')?.focus(); return; }
+  try {
+    await authRequest(`recover?redirect_to=${encodeURIComponent(location.origin + location.pathname)}`, { email });
+    alert(`Wir haben dir eine E-Mail an ${email} geschickt.\n\nTippe auf den Link darin – es öffnet sich eine Seite, auf der du ein neues Passwort festlegst. Danach meldest du dich hier mit dem neuen Passwort an.\n\n(Die Mail kann 1–2 Minuten dauern, schau auch im Spam-Ordner.)`);
+  } catch (e) {
+    toast(friendlyAuthError(e));
+  }
+}
+
+function newPasswordSheet() {
+  openSheet(`<form id="pw-form" novalidate>
+    <div class="sheet-head">
+      <span></span>
+      <h2 id="sheet-title">Neues Passwort</h2>
+      <button type="submit" class="save">Sichern</button>
+    </div>
+    <p style="margin:0 4px 14px;font-size:15px">Lege ein neues Passwort für <b>${esc(session?.user.email || '')}</b> fest.</p>
+    <div class="field"><label for="pw-new">Neues Passwort</label>
+      <input id="pw-new" name="password" type="password" autocomplete="new-password" minlength="6" required></div>
+    <div class="field"><label for="pw-new2">Passwort wiederholen</label>
+      <input id="pw-new2" name="password2" type="password" autocomplete="new-password" minlength="6" required></div>
+    <div class="hint" style="margin:0 4px">Mindestens 6 Zeichen. Tipp: Lass es vom iPhone speichern, wenn es fragt.</div>
+  </form>`);
+}
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'pw-form') return;
+  e.preventDefault();
+  const pw = e.target.elements.password.value;
+  if (pw.length < 6) { toast('Mindestens 6 Zeichen'); return; }
+  if (pw !== e.target.elements.password2.value) { toast('Die Passwörter stimmen nicht überein'); return; }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new AuthError(data.msg || data.message || `Fehler ${res.status}`, res.status, data.error_code);
+    closeSheet();
+    alert('Neues Passwort gespeichert ✓\n\nDu bist hier angemeldet. Melde dich in der App auf deinem Startbildschirm (und am Laptop) mit dem neuen Passwort an.');
+    render();
+  } catch (err) {
+    const msg = String(err.message || '').toLowerCase();
+    toast(msg.includes('different from the old') || err.code === 'same_password'
+      ? 'Das neue Passwort muss sich vom alten unterscheiden'
+      : friendlyAuthError(err));
+  }
+});
+
 Object.assign(actions, {
   syncSignup: signup,
+  syncForgot: forgotPassword,
   syncNow() { syncNow().then(() => { if (syncState.status === 'ok') toast('Abgeglichen ✓'); }); },
   async syncLogout() {
     if (!confirm('Abmelden? Deine Daten bleiben auf diesem Gerät, werden aber nicht mehr abgeglichen.')) return;
@@ -370,9 +425,20 @@ document.addEventListener('submit', (e) => {
 /* ---------- Start ---------- */
 // Nach dem Klick auf den Bestätigungslink aus der E-Mail landet man hier mit Tokens in der Adresse.
 (function handleAuthRedirect() {
-  if (!syncConfigured() || !location.hash.includes('access_token=')) return;
+  if (!syncConfigured()) return;
   const p = new URLSearchParams(location.hash.slice(1));
+  // Abgelaufener oder schon benutzter Link
+  if (p.get('error')) {
+    history.replaceState(null, '', location.pathname + location.search);
+    const expired = p.get('error_code') === 'otp_expired' || /expired|invalid/i.test(p.get('error_description') || '');
+    setTimeout(() => alert(expired
+      ? 'Der Link ist abgelaufen oder wurde schon benutzt. Fordere unter ⚙️ → „Passwort vergessen?“ einfach einen neuen an.'
+      : `Anmelde-Link fehlgeschlagen: ${p.get('error_description') || p.get('error')}`), 300);
+    return;
+  }
+  if (!p.get('access_token')) return;
   history.replaceState(null, '', location.pathname + location.search);
+  const isRecovery = p.get('type') === 'recovery';
   const access = p.get('access_token');
   try {
     const payload = JSON.parse(atob(access.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -382,7 +448,13 @@ document.addEventListener('submit', (e) => {
       expires_at: Date.now() + Number(p.get('expires_in') || 3600) * 1000,
       user: { id: payload.sub, email: payload.email },
     });
-    toast('E-Mail bestätigt – du bist angemeldet ✓');
+    if (isRecovery) {
+      ui.tab = 'settings';
+      render();
+      setTimeout(newPasswordSheet, 300);
+    } else {
+      toast('E-Mail bestätigt – du bist angemeldet ✓');
+    }
   } catch (e) {
     console.warn('Anmelde-Link konnte nicht gelesen werden', e);
   }
