@@ -7,7 +7,7 @@
 const STORAGE_KEY = 'lebensdashboard:v1';
 const DATA_VERSION = 1;
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '11';
+const APP_VERSION = '12';
 
 const CATEGORIES = ['Gesundheit', 'Beruf', 'Finanzen', 'Beziehungen', 'Persönlich', 'Lernen', 'Freizeit'];
 const PRIOS = { 3: 'Hoch', 2: 'Normal', 1: 'Niedrig' };
@@ -483,7 +483,8 @@ const views = {
     const area = ui.todoArea;
     const inArea = db.todos.filter((t) => t.area === area);
     const recurring = inArea.filter((t) => t.repeat).sort((a, b) => a.created - b.created);
-    const recurringToday = recurring.filter(activeToday);
+    // Heute schon Erledigtes rutscht nach unten (sort ist stabil, die Reihenfolge bleibt sonst erhalten).
+    const recurringToday = recurring.filter(activeToday).sort((a, b) => Number(isDone(a)) - Number(isDone(b)));
     const pausedCount = recurring.length - recurringToday.length;
     const once = inArea.filter((t) => !t.repeat);
     const openOnce = once.filter((t) => !t.done).sort(byPriority);
