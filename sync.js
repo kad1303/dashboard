@@ -128,6 +128,7 @@ function sharedData(d) {
     goals: d.goals,
     quotes: d.quotes,
     birthdays: d.birthdays || [],
+    notes: d.notes || [],
     deleted: d.deleted || {},
   };
 }
@@ -179,7 +180,8 @@ function applyMerged(merged) {
   db = migrate(merged);
   writeLocal();
   takeSnapshot();
-  render();
+  // Beim Schreiben einer Notiz nicht neu zeichnen (sonst springt der Cursor) – die Notiz wird beim nächsten Tippen ohnehin gespeichert.
+  if (!(typeof isTypingNote === 'function' && isTypingNote())) render();
   return true;
 }
 
@@ -211,6 +213,8 @@ async function syncNow() {
   if (!navigator.onLine) { setSyncStatus('offline'); return; }
   // Während ein Formular offen ist, keine Daten austauschen (sonst ginge die Eingabe verloren).
   if (!$('#sheet').hidden) { scheduleSync(3000); return; }
+  // Gerade getippten Notiz-Text vorher sichern, damit er mitgeschickt wird.
+  if (typeof flushNoteSave === 'function') flushNoteSave();
 
   syncState.busy = true;
   setSyncStatus('syncing');

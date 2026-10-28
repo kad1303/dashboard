@@ -320,3 +320,41 @@ body.has-nl-badge { --bar-bottom: max(var(--safe-bottom), 54px); }
 .bday-row.is-today { background: rgba(224, 86, 154, 0.08); }
 .bday-row.is-today .t { font-weight: 700; }
 .chooser-emoji { font-size: 22px; line-height: 24px; }
+
+/* Notizen */
+body[data-tab="notizen"] main { max-width: 1100px; }
+.notes { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.notes-side input[type="search"] { margin-bottom: 12px; min-height: 42px; padding: 9px 14px; }
+.note-row { min-height: 64px; }
+.note-row .t { font-weight: 600; }
+.note-row .sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-row.sel { background: var(--accent-soft); }
+.note-pane {
+  display: flex; flex-direction: column;
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 4px 6px 8px;
+  min-height: calc(100dvh - var(--safe-top) - var(--tabbar-h) - var(--bar-bottom) - 110px);
+}
+.note-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 0 8px; }
+.note-bar .meta { flex: 1; text-align: center; font-size: 12px; }
+.note-bar .icon-btn { color: var(--danger); }
+.note-text {
+  flex: 1; width: 100%; min-height: 300px; resize: none;
+  border: 0; background: transparent; padding: 6px 10px 12px;
+  font-size: 17px; line-height: 1.5;
+}
+.note-text:focus { border: 0; }
+.note-placeholder { display: none; }
+/* Handy: entweder die Liste oder die geöffnete Notiz */
+.notes.has-open .notes-side { display: none; }
+@media (max-width: 759px) {
+  body.note-open .fab { display: none; }
+}
+/* Laptop/Tablet: Liste links, Notiz rechts */
+@media (min-width: 760px) {
+  .notes { grid-template-columns: 300px 1fr; align-items: start; }
+  .notes.has-open .notes-side { display: block; }
+  .notes-side { position: sticky; top: calc(var(--safe-top) + 72px); max-height: calc(100dvh - var(--safe-top) - var(--tabbar-h) - var(--bar-bottom) - 110px); overflow-y: auto; }
+  .note-back { visibility: hidden; }
+  .note-placeholder { display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); }
+}

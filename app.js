@@ -7,14 +7,14 @@
 const STORAGE_KEY = 'lebensdashboard:v1';
 const DATA_VERSION = 1;
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '12';
+const APP_VERSION = '13';
 
 const CATEGORIES = ['Gesundheit', 'Beruf', 'Finanzen', 'Beziehungen', 'Persönlich', 'Lernen', 'Freizeit'];
 const PRIOS = { 3: 'Hoch', 2: 'Normal', 1: 'Niedrig' };
 const AREAS = { arbeit: 'Arbeit', privat: 'Privat' };
 const REPEATS = { '': 'Einmalig', daily: 'Täglich', weekdays: 'Werktags (Mo–Fr)' };
 const REPEAT_CHIPS = { daily: '↻ Täglich', weekdays: '↻ Mo–Fr' };
-const TITLES = { heute: 'Heute', termine: 'Termine', todos: 'To-Dos', ziele: 'Ziele', motivation: 'Motivation', settings: 'Einstellungen', geburtstage: 'Geburtstage' };
+const TITLES = { heute: 'Heute', termine: 'Termine', todos: 'To-Dos', ziele: 'Ziele', notizen: 'Notizen', motivation: 'Motivation', settings: 'Einstellungen', geburtstage: 'Geburtstage' };
 // Unterseiten, die in der Tab-Leiste zu einem Haupt-Tab gehören
 const PARENT_TAB = { geburtstage: 'termine' };
 
@@ -61,13 +61,15 @@ const ICON = {
   upload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9m0 0-4 4m4-4 4 4M5 4h14"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   sync: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.3 4.9M4 12a8 8 0 0 1 14.3-4.9M18 3v4.5h-4.5M6 21v-4.5h4.5"/></svg>',
+  note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4M8 12h8M8 16h6"/></svg>',
   bell: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
   bellOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.7 3.4A6 6 0 0 1 18 8c0 3.2.6 5.4 1.3 6.8M17 17H3s3-2 3-9c0-.8.1-1.5.4-2.2M10.3 21a1.9 1.9 0 0 0 3.4 0M3 3l18 18"/></svg>',
   logout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11"/></svg>',
 };
 
 /* ---------- Speicher ---------- */
-const COLLECTIONS = ['events', 'todos', 'goals', 'quotes', 'birthdays'];
+// "goals" wird nicht mehr angezeigt, bleibt aber gespeichert, damit nichts verloren geht.
+const COLLECTIONS = ['events', 'todos', 'goals', 'quotes', 'birthdays', 'notes'];
 
 function defaults() {
   return {
@@ -79,6 +81,7 @@ function defaults() {
     goals: [],
     // Feste IDs, damit die Beispielsprüche auf mehreren Geräten nicht doppelt auftauchen.
     birthdays: [],
+    notes: [],
     quotes: SEED_QUOTES.map((q, i) => ({ id: `seed-${i + 1}`, ...q, fav: false })),
     deleted: {}, // "sammlung:id" -> Zeitpunkt der Löschung (für den Abgleich zwischen Geräten)
     hideInstallHint: false,
@@ -277,6 +280,88 @@ function birthdayRow(b, ds) {
   </button>`;
 }
 
+/* ---------- Notizen ---------- */
+// Titel = erste Zeile, Vorschau = Rest. Sortiert nach letzter Änderung ("updated" setzt save()).
+const noteLines = (n) => (n.text || '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
+const noteTitle = (n) => (noteLines(n)[0] || 'Neue Notiz').slice(0, 80);
+const notePreview = (n) => noteLines(n).slice(1).join(' ').slice(0, 100);
+const noteTime = (n) => n.updated || n.created || 0;
+const isWide = () => matchMedia('(min-width: 760px)').matches;
+const isTypingNote = () => document.activeElement?.id === 'note-editor';
+
+function noteDate(n) {
+  const t = noteTime(n);
+  if (!t) return '';
+  const d = new Date(t);
+  const ds = dateStr(d);
+  if (ds === today()) return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  if (ds === addDays(today(), -1)) return 'Gestern';
+  return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+}
+
+function notesListRows() {
+  const q = ui.noteQuery.trim().toLowerCase();
+  const list = [...db.notes]
+    .filter((n) => !q || (n.text || '').toLowerCase().includes(q))
+    .sort((a, b) => noteTime(b) - noteTime(a));
+  if (!list.length) {
+    return q
+      ? '<div class="empty">Keine Notiz gefunden.</div>'
+      : '<div class="empty">Noch keine Notizen.<br><button class="link" data-action="newNote">Neue Notiz</button></div>';
+  }
+  return list.map((n) => {
+    const preview = notePreview(n);
+    return `<button class="row note-row ${n.id === ui.noteId ? 'sel' : ''}" data-action="openNote" data-id="${n.id}">
+      <div class="main">
+        <div class="t">${esc(noteTitle(n))}</div>
+        <div class="sub">${esc(noteDate(n))}${preview ? ` · ${esc(preview)}` : ''}</div>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// Leere Notizen (angelegt, aber nichts geschrieben) wieder entfernen.
+function purgeEmptyNotes(keepId = null) {
+  const before = db.notes.length;
+  db.notes = db.notes.filter((n) => n.id === keepId || (n.text || '').trim());
+  if (db.notes.length !== before) save();
+}
+
+let noteSaveTimer = null;
+function flushNoteSave() {
+  clearTimeout(noteSaveTimer);
+  noteSaveTimer = null;
+  const ed = document.getElementById('note-editor');
+  if (!ed) return;
+  let n = byId(db.notes, ed.dataset.id);
+  if (!n) {
+    // Notiz wurde zwischenzeitlich (z. B. auf einem anderen Gerät) gelöscht → beim Weiterschreiben wiederherstellen.
+    if (!ed.value.trim()) return;
+    n = { id: ed.dataset.id, text: '', created: Date.now() };
+    db.notes.push(n);
+  }
+  if (n.text === ed.value) return;
+  n.text = ed.value;
+  save();
+  const list = document.getElementById('notes-list');
+  if (list) list.innerHTML = notesListRows();
+  const stamp = document.getElementById('note-stamp');
+  if (stamp) stamp.textContent = `Bearbeitet: ${noteDate(n)}`;
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'note-editor') {
+    clearTimeout(noteSaveTimer);
+    noteSaveTimer = setTimeout(flushNoteSave, 400);
+  } else if (e.target.id === 'note-search') {
+    ui.noteQuery = e.target.value;
+    $('#notes-list').innerHTML = notesListRows();
+  }
+});
+document.addEventListener('focusout', (e) => { if (e.target.id === 'note-editor') flushNoteSave(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNoteSave(); });
+window.addEventListener('pagehide', flushNoteSave);
+
 const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -357,7 +442,6 @@ const views = {
     const allOpen = openTodosSorted();
     const todos = allOpen.slice(0, 6);
     const openCount = allOpen.length;
-    const goals = [...db.goals].sort((a, b) => goalProgress(a) - goalProgress(b)).slice(0, 3);
 
     return `${installHint()}
     <div class="hero">
@@ -375,10 +459,6 @@ const views = {
     <section>
       <div class="sec-head"><h2>To-Dos${openCount ? ` <span class="meta">(${openCount} offen)</span>` : ''}</h2><button class="link" data-action="go" data-id="todos">Alle</button></div>
       <div class="card list">${todos.length ? todos.map((x) => todoRow(x, true)).join('') : empty('Alles erledigt. 🎉', 'addTodo', 'To-Do hinzufügen')}</div>
-    </section>
-    <section>
-      <div class="sec-head"><h2>Ziele</h2><button class="link" data-action="go" data-id="ziele">Alle</button></div>
-      <div class="card list">${goals.length ? goals.map(goalMini).join('') : empty('Noch keine Ziele.', 'addGoal', 'Ziel festlegen')}</div>
     </section>`;
   },
 
@@ -539,6 +619,28 @@ const views = {
     </article>`).join('');
   },
 
+  notizen() {
+    const n = ui.noteId ? byId(db.notes, ui.noteId) : null;
+    if (!n) ui.noteId = null;
+    const pane = n
+      ? `<div class="note-pane">
+          <div class="note-bar">
+            <button class="link note-back" data-action="closeNote">‹ Notizen</button>
+            <span class="meta" id="note-stamp">${noteTime(n) && n.text ? `Bearbeitet: ${esc(noteDate(n))}` : ''}</span>
+            <button class="icon-btn" data-action="deleteNote" data-id="${n.id}" aria-label="Notiz löschen">${ICON.trash}</button>
+          </div>
+          <textarea id="note-editor" class="note-text" data-id="${n.id}" placeholder="Schreib los … Die erste Zeile wird zum Titel." aria-label="Notiz">${esc(n.text)}</textarea>
+        </div>`
+      : '<div class="note-pane note-placeholder"><p>Wähle links eine Notiz aus<br>oder lege mit <b>+</b> eine neue an.</p></div>';
+    return `<div class="notes ${n ? 'has-open' : ''}">
+      <div class="notes-side">
+        <input id="note-search" type="search" placeholder="Notizen durchsuchen" value="${esc(ui.noteQuery)}" autocomplete="off" aria-label="Notizen durchsuchen">
+        <div class="card list" id="notes-list">${notesListRows()}</div>
+      </div>
+      ${pane}
+    </div>`;
+  },
+
   motivation() {
     const list = [...db.quotes].sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
     if (!list.length) return `<div class="card">${empty('Sammle hier Sprüche, Affirmationen und Texte, die dich antreiben.', 'addQuote', 'Text hinzufügen')}</div>`;
@@ -585,7 +687,7 @@ const views = {
 };
 
 /* ---------- Rendern ---------- */
-const ui = { tab: 'heute', todoFilter: 'open', todoArea: 'arbeit', selDay: today(), calMonth: today().slice(0, 7) };
+const ui = { tab: 'heute', todoFilter: 'open', todoArea: 'arbeit', selDay: today(), calMonth: today().slice(0, 7), noteId: null, noteQuery: '' };
 
 function selectDay(ds) {
   ui.selDay = ds;
@@ -618,6 +720,8 @@ function render() {
   $('#title').textContent = TITLES[ui.tab];
   document.title = `${TITLES[ui.tab]} · Lebens-Dashboard`;
   $('#fab').hidden = ui.tab === 'settings';
+  document.body.dataset.tab = ui.tab;
+  document.body.classList.toggle('note-open', ui.tab === 'notizen' && !!ui.noteId);
   document.querySelectorAll('.tab').forEach((b) => {
     const on = b.dataset.tab === (PARENT_TAB[ui.tab] || ui.tab);
     b.classList.toggle('active', on);
@@ -860,7 +964,7 @@ function chooser() {
   <div class="chooser">
     <button data-action="addEvent">${ICON.cal}Termin</button>
     <button data-action="addTodo">${ICON.todo}To-Do</button>
-    <button data-action="addGoal">${ICON.goal}Ziel</button>
+    <button data-action="newNote">${ICON.note}Notiz</button>
     <button data-action="addQuote">${ICON.star}Motivation</button>
     <button data-action="addBirthday"><span class="chooser-emoji" aria-hidden="true">🎂</span>Geburtstag</button>
   </div>`);
@@ -913,12 +1017,51 @@ $('#import-file').addEventListener('change', async (e) => {
 const actions = {
   go(id) {
     closeSheet();
+    flushNoteSave();
+    purgeEmptyNotes();
+    // Auf dem Handy führt der Notizen-Tab immer zur Liste.
+    if (id === 'notizen' && !isWide()) ui.noteId = null;
     ui.tab = id;
     render();
     window.scrollTo(0, 0);
   },
+  newNote() {
+    closeSheet();
+    flushNoteSave();
+    purgeEmptyNotes();
+    const n = { id: uid(), text: '', created: Date.now() };
+    db.notes.push(n); // wird erst beim ersten Tippen gespeichert
+    ui.tab = 'notizen';
+    ui.noteId = n.id;
+    ui.noteQuery = '';
+    render();
+    window.scrollTo(0, 0);
+    $('#note-editor')?.focus();
+  },
+  openNote(id) {
+    flushNoteSave();
+    purgeEmptyNotes(id);
+    ui.noteId = id;
+    render();
+    if (!isWide()) window.scrollTo(0, 0);
+  },
+  closeNote() {
+    flushNoteSave();
+    ui.noteId = null;
+    purgeEmptyNotes();
+    render();
+  },
+  deleteNote(id) {
+    const n = byId(db.notes, id);
+    if (n && (n.text || '').trim() && !confirm(`Notiz „${noteTitle(n)}“ löschen?`)) return;
+    clearTimeout(noteSaveTimer);
+    db.notes = db.notes.filter((x) => x.id !== id);
+    ui.noteId = null;
+    commit();
+    toast('Notiz gelöscht');
+  },
   add() {
-    ({ termine: () => eventForm(null, ui.selDay), todos: () => todoForm(), ziele: () => goalForm(), motivation: () => quoteForm(), geburtstage: () => birthdayForm() }[ui.tab] || chooser)();
+    ({ termine: () => eventForm(null, ui.selDay), todos: () => todoForm(), notizen: () => actions.newNote(), motivation: () => quoteForm(), geburtstage: () => birthdayForm() }[ui.tab] || chooser)();
   },
   addBirthday: () => birthdayForm(),
   editBirthday: (id) => birthdayForm(byId(db.birthdays, id)),
